@@ -137,18 +137,32 @@ def find_next_packages(input_stream, image_name):
 
 
 if __name__ == "__main__":
-    input_context = open('Dockerfile', 'rb')
-    image_name = 'build_tmp'
-    missing_packages, conflicting_packages, missing_files = find_next_packages(input_context, image_name)
-    if conflicting_packages:
-        print('The following packages are conflicting, decide which one of them:')
-        for conflicting_package in conflicting_packages:
-            print(conflicting_package)
-    if not missing_packages:
-        print('Could not find any missing packages, this might mean that the missing packages is an alternative one, such as cc or java or a virtual one')
-        print('Printing missing files:')
-        for missing_file in missing_files:
-            print(missing_file)
-    print('Missing packages:')
-    for missing_package in missing_packages:
-        print(missing_package)
+    import sys
+
+    if len(sys.argv) == 1:
+        sys.stderr.write('Usage: %s <docker filename> <temporary build docker image name>\n\n' % sys.argv[0])
+        sys.stderr.write('Tries to docker build the docker filename and figure out missing packages.\n\n')
+        sys.exit(1)
+    dockerfilename = sys.argv[1]
+    image_name = sys.argv[2]
+    #dockerfilename = 'Dockerfile'
+    #image_name = 'build_tmp'
+    try:
+        input_context = open(dockerfilename, 'rb')
+        missing_packages, conflicting_packages, missing_files = find_next_packages(input_context, image_name)
+        if conflicting_packages:
+            print('The following packages are conflicting, decide which one of them:')
+            for conflicting_package in conflicting_packages:
+                print(conflicting_package)
+        if not missing_packages:
+            print('Could not find any missing packages, this might mean that the missing packages is an alternative one, such as cc or java or a virtual one')
+            print('Printing missing files:')
+            for missing_file in missing_files:
+                print(missing_file)
+        print('Missing packages:')
+        for missing_package in missing_packages:
+            print(missing_package)
+    finally:
+        p_out = subprocess.Popen('docker rmi -f %s' % image_name, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p_out.communicate()
+        p_out.wait()

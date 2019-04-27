@@ -77,7 +77,9 @@ def find_packages(filenames, input_stream=None):
         for line in input_stream:
             data = line.rsplit(b' ', 1)
             filename = data[0].rstrip()
-            if filename in fixed_filenames:
+            as_dir = filename.rsplit(b'/', 1)[0]
+            # TODO maybe remove last / in filename input ?
+            if filename in fixed_filenames or as_dir in fixed_filenames:
                 packagesname = data[1][:-1]
                 packagesname = packagesname.split(b',')
                 packagesname = [x.rsplit(b'/', 1)[1].decode() for x in packagesname]

@@ -11,6 +11,7 @@ The current set of limitations should at least make this a useful exploratory to
 * For now the failing RUN directive needs to be able to run apt-get commands (by default running as USER root)
 * For now it works with Dockerfile which do not need a context (self containing)
 * The image will be running with the following options to allow strace to run: "--cap-add=SYS_PTRACE --pid=host"
+* Currently it only checks /etc/apt/sources.list (not sources.d)
 
 # Requirements
 
@@ -32,7 +33,7 @@ RUN python -c "import numpy; print(numpy.version.version)"
 Trying to docker build will fail because the basic image does not have nor python nor numpy. So let's run:
 
 ```bash
-python resolve.py
+python resolve.py Dockerfile build_tmp
 ```
 
 And it tells out we need to install python-minimal, So let's modify the Dockerfile:
@@ -48,13 +49,13 @@ RUN python -c "import numpy; print(numpy.version.version)"
 Now building fails, because it does not know what numpy is yet:
 
 ```bash
-python resolve.py
+python resolve.py Dockerfile build_tmp
 ```
 
 Tells us to now install python-numpy package (since python access the path by directory and not by file, it also gives us a false positive we can ignore, python-numpy-dbg):
 
 ```bash
-python resolve.py
+python resolve.py Dockerfile build_tmp
 ```
 
 And thus here is the final working Dockerfile:
