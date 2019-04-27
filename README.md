@@ -17,6 +17,7 @@ The current set of limitations should at least make this a useful exploratory to
 * Python 2.7 or 3
 * Docker runtime that can build and run the image
 * Linux APT based Dockerfile (such as debian, ubuntu)
+* tar
 
 # Quickstart
 

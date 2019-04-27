@@ -19,6 +19,7 @@ def combine_with_slash(*itr):
 def parse_sources_list(stream, arch='amd64', ignore_stuff=True):
     urls = []
     for line in stream:
+        line = line.decode()
         line = line.lstrip().rstrip()
         if not line.startswith('deb '):
             continue
@@ -41,8 +42,8 @@ def get_contents_data(url):
     return dec.decompress(response)
 
 
-def update(input_stream, output_stream=None):
-    urls = parse_sources_list(input_stream)
+def update(input_stream, output_stream=None, ignore_stuff=True):
+    urls = parse_sources_list(input_stream, ignore_stuff=ignore_stuff)
     should_close = False if output_stream else True
     output_stream = output_stream or open('cache.db', 'wb')
     try:
@@ -63,8 +64,10 @@ def update(input_stream, output_stream=None):
 def find_packages(filenames, input_stream=None):
     fixed_filenames = set()
     for filename in set(filenames):
+        if not isinstance(filename, bytes):
+            filename = filename.encode()
         fixed_filenames.add(filename[1:])
-        fixed_filenames.add(filename[1:] + '/')
+        fixed_filenames.add(filename[1:] + b'/')
 
     packages = set()
     conflicts = set()
@@ -76,7 +79,7 @@ def find_packages(filenames, input_stream=None):
             filename = data[0].rstrip()
             if filename in fixed_filenames:
                 packagesname = data[1][:-1]
-                packagesname = packagesname.split(',')
+                packagesname = packagesname.split(b',')
                 packagesname = [x.rsplit(b'/', 1)[1].decode() for x in packagesname]
                 packagesname.sort()
                 packagesname = tuple(packagesname)
@@ -92,6 +95,12 @@ def find_packages(filenames, input_stream=None):
 if __name__ == "__main__":
     import sys
 
+    if len(sys.argv) == 1:
+        sys.stderr.write('Usage: %s update [sources.list file or - or empty for stdin]\n\n' % sys.argv[0])
+        sys.stderr.write('Parse the sources.list repositories for indexing.\n\n')
+        sys.stderr.write('Usage: %s find [file names to search or - or empty for stdin]\n\n' % sys.argv[0])
+        sys.stderr.write('Search the indexed database for packages containing the filename.\n\n')
+        sys.exit(1)
     if sys.argv[1] == 'update':
         if len(sys.argv) == 2 or sys.argv[2] == '-':
             update(sys.stdin)

@@ -1,6 +1,13 @@
 # if not found packages, show files, cc -> gcc, java -> ?
+# TODO add all sources.list
+# TODO document you need tar
+# TODO document search for provides
 import subprocess
 from io import BytesIO
+import aptfile
+
+
+debug = False
 
 
 def parse_dockerfile_stream(stream, num_lines=None, fix=False):
@@ -10,16 +17,16 @@ def parse_dockerfile_stream(stream, num_lines=None, fix=False):
     for i, line in enumerate(stream):
         lrstrip = line.rstrip()
         # Handle Dockerfile's RUN multiline support
-        if lrstrip and lrstrip[-1] == '\\':
+        if lrstrip and lrstrip[-1] == b'\\':
             if not catline:
-                if line.lstrip().split(' ', 1)[0].lower() == 'run':
+                if line.lstrip().split(b' ', 1)[0].lower() == b'run':
                     catline.append(line)
             else:
                 catline.append(line)
         else:
             if catline:
                 catline.append(line)
-                lines.append(''.join(catline))
+                lines.append(b''.join(catline))
                 catline = []
             else:
                 lines.append(line)
@@ -32,11 +39,11 @@ def parse_dockerfile_stream(stream, num_lines=None, fix=False):
         lines = lines[:-1]
         # TODO handle SHELL FORM
         # TODO allow custom shell
-        l1 = 'RUN apt-get update && apt-get install -y strace && mkdir /tmp/strace_output\n'
-        l2= 'ENTRYPOINT ["strace", "-I4", "-e", "file", "-ff", "-o", "/tmp/strace_output/strace_output", "/bin/sh", "-c", "' + line.lstrip().split(' ', 1)[1].rstrip().replace(r'"', r'\"').replace('\t', r'\t') + '"]\n'
-        line = ''.join([l1, l2])
+        l1 = b'RUN apt-get update && apt-get install -y strace && mkdir /tmp/strace_output\n'
+        l2= b'ENTRYPOINT ["strace", "-I4", "-e", "file", "-ff", "-o", "/tmp/strace_output/strace_output", "/bin/sh", "-c", "' + line.lstrip().split(b' ', 1)[1].rstrip().replace(br'"', br'\"').replace(b'\t', br'\t') + b'"]\n'
+        line = b''.join([l1, l2])
         lines.append(line)
-    return BytesIO('\n'.join(lines))
+    return BytesIO(b'\n'.join(lines))
 
 
 def build_with(stream, image_tag):
@@ -44,26 +51,28 @@ def build_with(stream, image_tag):
     p_out.stdin.write(stream.read())
     p_out.stdin.close()
     p_out.wait()
-    return p_out
+    return p_out.returncode
 
 
 def docker_get_strace_output(docker_image_id):
     # TODO check return value error
     # TODO handle finally cleanup
-    p_out = subprocess.Popen('docker create -it --cap-add=SYS_PTRACE --pid=host %s' % docker_image_id, shell=True, stdout=subprocess.PIPE)
-    docker_container_id = p_out.stdout.read().rstrip()
-    p_out.stdout.close()
-    p_out.wait()
-    p_out = subprocess.Popen('docker start -ia %s' % docker_container_id, shell=True)
-    p_out.wait()
-    # TODO handle processing only strace output files
-    p_out = subprocess.Popen('docker cp %s:/tmp/strace_output - | tar -xvO' % docker_container_id, shell=True, stdout=subprocess.PIPE)
-    strace_output = p_out.stdout.read()
-    p_out.stdout.close()
-    p_out.wait()
-    p_out = subprocess.Popen('docker rm -f %s' % docker_container_id, shell=True)
-    p_out.wait()
-    return strace_output
+    # --pid=host is needed for older strace versions...
+    try:
+        p_out = subprocess.Popen('docker create -it --cap-add=SYS_PTRACE --pid=host %s' % docker_image_id, shell=True, stdout=subprocess.PIPE)
+        docker_container_id = p_out.stdout.read().rstrip().decode()
+        p_out.stdout.close()
+        p_out.wait()
+        p_out = subprocess.Popen('docker start -ia %s' % docker_container_id, shell=True)
+        p_out.wait()
+        # TODO handle processing only strace output files
+        p_out = subprocess.Popen('docker cp %s:/tmp/strace_output - | tar -xvO' % docker_container_id, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        strace_output, strace_error = p_out.communicate()
+        p_out.wait()
+        return strace_output
+    finally:
+        p_out = subprocess.Popen('docker rm -f %s' % docker_container_id, shell=True)
+        p_out.wait()
 
 
 def docker_get_aptsources_output(docker_image_id):
@@ -78,16 +87,16 @@ def docker_get_aptsources_output(docker_image_id):
 
 def parse_strace_output(strace_output):
     fnames = []
-    for line in strace_output.split('\n'):
-        #print(line)
-        if '=' not in line:
+    for line in strace_output.split(b'\n'):
+        if debug:
+            print(line)
+        if b'=' not in line:
             continue
-        data = line.rsplit(' = ', 1)
-        if len(data) >= 2 and 'ENOENT' in data[1]:
+        data = line.rsplit(b' = ', 1)
+        if len(data) >= 2 and b'ENOENT' in data[1]:
             # TODO make this less flaky
-            fname = data[0].split('"', 1)[1].split('", ', 1)[0]
-#            fname = data[0].split('"', 1)[1].rsplit('"', 1)[0]
-            if fname.startswith('/usr/local') or fname[0] != '/' or fname.startswith('/tmp'):
+            fname = data[0].split(b'"', 1)[1].split(b'", ', 1)[0]
+            if fname.startswith(b'/usr/local') or not fname.startswith(b'/') or fname.startswith(b'/tmp'):
                 continue
             fnames.append(fname)
     return fnames
@@ -99,35 +108,47 @@ def build_till_next_error(stream, image_tag):
         s = parse_dockerfile_stream(stream, i)
         if s is None:
             return None
-        p_out = build_with(s, image_tag)
-        if p_out.returncode != 0:
-            p_out = build_with(parse_dockerfile_stream(stream, i, True), image_tag)
+        returncode = build_with(s, image_tag)
+        if returncode != 0:
+            build_with(parse_dockerfile_stream(stream, i, True), image_tag)
             return docker_get_strace_output(image_tag)
-            break
         i += 1
 
 
 def find_next_packages(input_stream, image_name):
-    input_context = open('Dockerfile', 'rt')
-    strace_output = build_till_next_error(input_context, 'build_tmp')
+    strace_output = build_till_next_error(input_context, image_name)
     if strace_output is None:
         print('build finished without errors')
         return
-    #print(strace_output)
+    if debug:
+        print(strace_output)
     missing_files = parse_strace_output(strace_output)
-    #print(missing_files)
-    #print(set(missing_files))
-    sources = docker_get_aptsources_output('build_tmp')
-    #print(sources)
-    import aptfile
-    import io
-    s = io.BytesIO(sources)
-    output = io.BytesIO()
+    if debug:
+        print(set(missing_files))
+    sources = docker_get_aptsources_output(image_name)
+    if debug:
+        print(sources)
+    s = BytesIO(sources)
+    output = BytesIO()
     aptfile.update(s, output)
     output.seek(0)
-    missing_packages = aptfile.find_packages(missing_files, output)
-    print(missing_packages)
+    missing_packages, conflicting_packages = aptfile.find_packages(missing_files, output)
+    return missing_packages, conflicting_packages, missing_files
 
 
 if __name__ == "__main__":
-    find_next_packages('a', 'b')
+    input_context = open('Dockerfile', 'rb')
+    image_name = 'build_tmp'
+    missing_packages, conflicting_packages, missing_files = find_next_packages(input_context, image_name)
+    if conflicting_packages:
+        print('The following packages are conflicting, decide which one of them:')
+        for conflicting_package in conflicting_packages:
+            print(conflicting_package)
+    if not missing_packages:
+        print('Could not find any missing packages, this might mean that the missing packages is an alternative one, such as cc or java or a virtual one')
+        print('Printing missing files:')
+        for missing_file in missing_files:
+            print(missing_file)
+    print('Missing packages:')
+    for missing_package in missing_packages:
+        print(missing_package)
