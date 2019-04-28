@@ -118,7 +118,7 @@ def build_till_next_error(stream, image_tag):
 def find_next_packages(input_stream, image_name):
     strace_output = build_till_next_error(input_context, image_name)
     if strace_output is None:
-        print('build finished without errors')
+#        print('build finished without errors')
         return
     if debug:
         print(strace_output)
@@ -149,7 +149,11 @@ if __name__ == "__main__":
     #image_name = 'build_tmp'
     try:
         input_context = open(dockerfilename, 'rb')
-        missing_packages, conflicting_packages, missing_files = find_next_packages(input_context, image_name)
+        result = find_next_packages(input_context, image_name)
+        if not result:
+            print('Finished building without errors')
+            sys.exit(0)
+        missing_packages, conflicting_packages, missing_files = result
         if conflicting_packages:
             print('The following packages are conflicting, decide which one of them:')
             for conflicting_package in conflicting_packages:
